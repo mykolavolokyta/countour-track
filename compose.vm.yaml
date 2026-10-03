@@ -1,0 +1,86 @@
+name: contour-vm
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: contour
+      POSTGRES_USER: contour
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python3 scripts/setup.py first}
+    volumes:
+      - contour_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U contour -d contour']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  api:
+    build: .
+    environment: &backend-environment
+      DATABASE_URL: postgresql+psycopg://contour:${POSTGRES_PASSWORD}@db:5432/contour
+      APP_ORIGIN: ${APP_ORIGIN:?Set the public HTTPS origin}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Run python3 scripts/setup.py first}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      TELEGRAM_CLIENT_ID: ${TELEGRAM_CLIENT_ID:-}
+      TELEGRAM_CLIENT_SECRET: ${TELEGRAM_CLIENT_SECRET:-}
+      FORWARDED_ALLOW_IPS: 172.30.90.10
+      MORALIS_API_KEY: ${MORALIS_API_KEY:-}
+      BSC_RPC_URLS: ${BSC_RPC_URLS:-https://bsc-dataseed.bnbchain.org,https://bsc-dataseed-public.bnbchain.org}
+      COINGECKO_DEMO_API_KEY: ${COINGECKO_DEMO_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  worker:
+    build: .
+    command: [python, -m, backend.worker]
+    environment: *backend-environment
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+  web:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+  proxy:
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set the public domain}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      default:
+        ipv4_address: 172.30.90.10
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.90.0/24
+
+volumes:
+  caddy_data:
+  caddy_config:
+  contour_data:

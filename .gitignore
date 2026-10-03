@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.db
+*.db-*
+node_modules/
+.next/
+*.tsbuildinfo
+artifacts/
+.DS_Store
+
+backups/
