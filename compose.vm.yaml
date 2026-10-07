@@ -28,6 +28,10 @@ services:
       FORWARDED_ALLOW_IPS: 172.30.90.10
       MORALIS_API_KEY: ${MORALIS_API_KEY:-}
       BSC_RPC_URLS: ${BSC_RPC_URLS:-https://bsc-dataseed.bnbchain.org,https://bsc-dataseed-public.bnbchain.org}
+      ETHEREUM_RPC_URLS: ${ETHEREUM_RPC_URLS:-https://ethereum-rpc.publicnode.com}
+      ARBITRUM_RPC_URLS: ${ARBITRUM_RPC_URLS:-https://arbitrum-one-rpc.publicnode.com,https://arb1.arbitrum.io/rpc}
+      OPTIMISM_RPC_URLS: ${OPTIMISM_RPC_URLS:-https://optimism-rpc.publicnode.com}
+      BASE_RPC_URLS: ${BASE_RPC_URLS:-https://base-rpc.publicnode.com}
       COINGECKO_DEMO_API_KEY: ${COINGECKO_DEMO_API_KEY:-}
     depends_on:
       db:

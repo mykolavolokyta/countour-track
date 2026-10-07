@@ -49,7 +49,7 @@ app.include_router(auth_router)
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
     # Pydantic's default error embeds submitted inputs, including secrets.
-    if any('token_contracts' in e['loc'] for e in exc.errors()):
+    if any('token_contracts' in e['loc'] or 'contracts_by_chain' in e['loc'] for e in exc.errors()):
         return JSONResponse(status_code=422, content={'detail': 'Перевірте контракти токенів: до 20 різних адрес 0x із 40 шістнадцятковими символами, без нульової адреси.'})
     if any('iban' in e['loc'] for e in exc.errors()):
         return JSONResponse(status_code=422, content={'detail': 'Перевірте IBAN: потрібен український рахунок із правильною контрольною сумою.'})
@@ -84,8 +84,18 @@ class SourceInput(Input):
     price_usd: Optional[Decimal] = Field(default=None, ge=0, max_digits=30, decimal_places=15, allow_inf_nan=False)
     futures: list[Literal['usdm', 'coinm']] = Field(default_factory=lambda: ['usdm'], max_length=2)
     interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
+    chain: Literal['all', 'bsc', 'ethereum', 'arbitrum', 'optimism', 'base'] = 'bsc'
     provider: Literal['rpc', 'moralis'] = 'rpc'
     token_contracts: list[str] = Field(default_factory=list, max_length=20)
+
+    contracts_by_chain: dict[Literal['bsc', 'ethereum', 'arbitrum', 'optimism', 'base'], list[str]] = Field(default_factory=dict)
+
+    @field_validator('contracts_by_chain')
+    @classmethod
+    def validate_chain_contracts(cls, value):
+        if any(len(contracts) > 20 for contracts in value.values()):
+            raise ValueError('Maximum 20 contracts per network')
+        return {chain: cls.validate_contracts(contracts) for chain, contracts in value.items()}
 
     @field_validator('iban')
     @classmethod
@@ -106,6 +116,12 @@ class SourceInput(Input):
     def required_fields(self):
         if self.kind == 'privatbank' and not self.iban:
             raise ValueError('IBAN required')
+        if self.kind == 'bsc' and self.chain != 'bsc' and self.provider == 'moralis':
+            raise ValueError('Moralis discovery is available only for BSC')
+        if self.kind == 'bsc' and self.chain == 'all' and self.token_contracts:
+            raise ValueError('Use contracts_by_chain for multi-network wallets')
+        if self.kind == 'bsc' and self.chain != 'all' and self.contracts_by_chain:
+            raise ValueError('Use token_contracts for a single network')
         if self.kind == 'bsc' and not self.address:
             raise ValueError('Address required')
         if self.kind == 'manual' and (not self.symbol or self.quantity is None):
@@ -124,8 +140,11 @@ class SourceInput(Input):
         if self.kind == 'privatbank':
             return {'iban': self.iban}
         if self.kind == 'bsc':
+            if self.chain == 'all':
+                return {'address': self.address.lower(), 'provider': self.provider,
+                        'chain': 'all', 'contracts_by_chain': self.contracts_by_chain}
             return {'address': self.address.lower(), 'provider': self.provider,
-                    'token_contracts': self.token_contracts}
+                    'token_contracts': self.token_contracts, 'chain': self.chain}
         if self.kind == 'manual':
             return {'symbol': self.symbol, 'quantity': str(self.quantity),
                     'asset_category': self.asset_category, 'locked': self.locked,
@@ -193,7 +212,12 @@ def apply_input(source, body):
     if source.kind == 'bsc' and source.config:
         if 'provider' not in body.model_fields_set:
             new_config['provider'] = source.config.get('provider', 'moralis')
-        if 'token_contracts' not in body.model_fields_set:
+        if body.chain == 'all':
+            if 'contracts_by_chain' not in body.model_fields_set:
+                new_config['contracts_by_chain'] = source.config.get('contracts_by_chain', {
+                    source.config.get('chain', 'bsc'): source.config.get('token_contracts', [])
+                } if source.config.get('chain', 'bsc') != 'all' else {})
+        elif 'token_contracts' not in body.model_fields_set:
             new_config['token_contracts'] = source.config.get('token_contracts', [])
     source.name, source.config, source.interval_minutes = body.name, new_config, body.interval_minutes
     if source.kind in ('binance', 'bybit') and body.api_key:
@@ -211,8 +235,8 @@ def check_duplicate(db, body, user_id, source_id=None):
                 raise HTTPException(409, 'Цей IBAN уже додано. Дублювання рахунку подвоїть баланс.')
     if body.kind == 'bsc':
         for other in db.scalars(select(Source).where(Source.kind == 'bsc', Source.user_id == user_id, Source.active.is_(True))):
-            if other.id != source_id and other.config['address'] == body.address.lower():
-                raise HTTPException(409, 'Ця BSC-адреса вже додана.')
+            if other.id != source_id and other.config['address'].lower() == body.address.lower() and (body.chain == 'all' or other.config.get('chain', 'bsc') in ('all', body.chain)):
+                raise HTTPException(409, 'Ця адреса вже враховується в одній із цих мереж. Від’єднайте дублікати перед увімкненням усіх мереж.')
 
 
 def record_manual_change(db, source):
@@ -253,6 +277,18 @@ def edit_source(source_id: str, body: SourceInput, user=Depends(require_user)):
             raise HTTPException(422, 'Тип джерела змінити не можна.')
         if source.lease_until > now():
             raise HTTPException(409, 'Триває оновлення. Спробуйте за хвилину.')
+        if source.kind == 'bsc':
+            existing_chain = source.config.get('chain', 'bsc')
+            if 'chain' not in body.model_fields_set:
+                body.chain = existing_chain
+            if body.chain not in (existing_chain, 'all'):
+                raise HTTPException(422, 'Можна розширити гаманець до всіх мереж. Для заміни мережі додайте окреме джерело.')
+            if 'provider' not in body.model_fields_set:
+                body.provider = source.config.get('provider', 'moralis')
+            if body.chain == 'all' and body.token_contracts:
+                raise HTTPException(422, 'Для всіх мереж задайте контракти окремо через contracts_by_chain.')
+            if body.chain != 'bsc' and body.provider == 'moralis':
+                raise HTTPException(422, 'Moralis доступний лише для BSC.')
         check_duplicate(db, body, user['user_id'], source_id)
         apply_input(source, body)
         record_manual_change(db, source)

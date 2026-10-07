@@ -145,7 +145,7 @@ def test_api_persists_provider_and_validates_contracts(member):
     body={'kind':'bsc','name':'RPC','address':ADDRESS,'token_contracts':[TOKEN.upper().replace('0X','0x')]}
     result=member.post('/api/sources',json=body)
     assert result.status_code==201
-    assert result.json()['config']=={'address':ADDRESS,'provider':'rpc','token_contracts':[TOKEN]}
+    assert result.json()['config']=={'address':ADDRESS,'provider':'rpc','token_contracts':[TOKEN],'chain':'bsc'}
     for contracts in ([TOKEN,TOKEN.upper()],['bad'],['0x'+'0'*40],[TOKEN]*21):
         result=member.post('/api/sources',json=dict(body,token_contracts=contracts))
         assert result.status_code==422 and 'контракти' in result.json()['detail']
@@ -188,3 +188,64 @@ def test_contract_pricing_and_rate_limit(monkeypatch):
     bsc_rpc._token_price_cache.clear()
     state['status']=429
     assert bsc_rpc.token_prices([TOKEN])=={}
+
+
+@pytest.mark.parametrize('chain', ['ethereum', 'arbitrum', 'optimism', 'base'])
+def test_evm_network_balance_and_valuation(chain, rpc, monkeypatch):
+    calls, state, default = rpc
+    network = config.EVM_CHAINS[chain]
+    state['respond'] = lambda b: hex(network['id']) if b['method'] == 'eth_chainId' else default(b)
+    monkeypatch.setattr(bsc_rpc, 'prices', lambda symbols: {'ETH': Decimal('2000')})
+    monkeypatch.setattr(bsc_rpc, 'token_prices', lambda contracts, selected: {TOKEN: Decimal('1')} if selected == chain else {})
+    rows, _, warnings = adapters.collect(SimpleNamespace(kind='bsc', config={
+        'address': ADDRESS, 'chain': chain, 'provider': 'rpc', 'token_contracts': [TOKEN]}), {})
+    assert rows[0]['symbol'] == 'ETH' and rows[0]['value_usd'] == '4000'
+    assert rows[0]['asset_id'] == f"evm:{network['id']}:native"
+    assert rows[1]['asset_id'] == f"evm:{network['id']}:{TOKEN}"
+    assert rows[1]['value_usd'] == '1.234567'
+    assert rows[1]['account'] == network['name']
+    assert network['name'] in warnings[-1]
+
+
+def test_evm_wrong_chain_is_rejected(rpc):
+    with pytest.raises(adapters.SyncError):
+        bsc_rpc.bsc_rpc_data(ADDRESS, [], 'ethereum')
+
+
+def test_same_address_different_networks_and_immutable_chain(member):
+    body = {'kind': 'bsc', 'name': 'Wallet', 'address': ADDRESS}
+    bsc = member.post('/api/sources', json=body)
+    eth = member.post('/api/sources', json=dict(body, chain='ethereum'))
+    assert bsc.status_code == eth.status_code == 201
+    assert member.post('/api/sources', json=dict(body, chain='ethereum')).status_code == 409
+    assert member.post('/api/sources', json=dict(body, chain='unsupported')).status_code == 422
+    assert member.post('/api/sources', json=dict(body, chain='base', provider='moralis')).status_code == 422
+    source_id = eth.json()['id']
+    # An older client omitting chain must not turn Ethereum into BSC or cause
+    # a spurious duplicate conflict with the existing BSC source.
+    updated = member.put('/api/sources/' + source_id, json=dict(body, name='Renamed'))
+    assert updated.status_code == 200 and updated.json()['config']['chain'] == 'ethereum'
+    assert member.put('/api/sources/' + source_id, json=dict(body, chain='base')).status_code == 422
+    assert member.put('/api/sources/' + source_id, json=dict(body, provider='moralis')).status_code == 422
+
+
+def test_evm_contract_price_cache_is_network_scoped(monkeypatch):
+    bsc_rpc._token_price_cache.clear()
+    calls = []
+    def handler(request):
+        calls.append(request.url.path)
+        value = '2' if request.url.path.endswith('/ethereum') else '3'
+        return httpx.Response(200, json={TOKEN: {'usd': value}})
+    client = httpx.Client
+    monkeypatch.setattr(bsc_rpc.httpx, 'Client', lambda **kw: client(transport=httpx.MockTransport(handler), **kw))
+    assert bsc_rpc.token_prices([TOKEN], 'ethereum')[TOKEN] == Decimal('2')
+    assert bsc_rpc.token_prices([TOKEN], 'base')[TOKEN] == Decimal('3')
+    assert bsc_rpc.token_prices([TOKEN], 'ethereum')[TOKEN] == Decimal('2')
+    assert len(calls) == 2
+
+
+def test_unpriced_evm_token_does_not_borrow_symbol_price(monkeypatch):
+    monkeypatch.setattr(adapters, 'prices', lambda symbols: {'USDT': Decimal('1')})
+    rows = [adapters.holding('USDT', Decimal('100'), 'Ethereum', 'evm:1:' + TOKEN)]
+    adapters.value_holdings(rows)
+    assert rows[0]['value_usd'] is None

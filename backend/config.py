@@ -22,3 +22,21 @@ GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
 TELEGRAM_CLIENT_ID = os.getenv('TELEGRAM_CLIENT_ID', '')
 TELEGRAM_CLIENT_SECRET = os.getenv('TELEGRAM_CLIENT_SECRET', '')
 ALLOW_REGISTRATION = os.getenv('ALLOW_REGISTRATION', 'true').lower() == 'true'
+
+# Supported EVM networks. Contract pricing is scoped to the CoinGecko platform.
+EVM_CHAINS = {
+    'bsc': {'id': 56, 'name': 'BSC', 'symbol': 'BNB', 'platform': 'binance-smart-chain'},
+    'ethereum': {'id': 1, 'name': 'Ethereum', 'symbol': 'ETH', 'platform': 'ethereum'},
+    'arbitrum': {'id': 42161, 'name': 'Arbitrum One', 'symbol': 'ETH', 'platform': 'arbitrum-one'},
+    'optimism': {'id': 10, 'name': 'Optimism', 'symbol': 'ETH', 'platform': 'optimistic-ethereum'},
+    'base': {'id': 8453, 'name': 'Base', 'symbol': 'ETH', 'platform': 'base'},
+}
+EVM_RPC_URLS = {
+    chain: tuple(url.strip() for url in os.getenv(chain.upper() + '_RPC_URLS', default).split(',') if url.strip())
+    for chain, default in {
+        'ethereum': 'https://ethereum-rpc.publicnode.com',
+        'arbitrum': 'https://arbitrum-one-rpc.publicnode.com,https://arb1.arbitrum.io/rpc',
+        'optimism': 'https://optimism-rpc.publicnode.com',
+        'base': 'https://base-rpc.publicnode.com',
+    }.items()
+}

@@ -33,3 +33,15 @@ dialog{color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:
 .social-login small{font-size:11px;font-weight:400}
 .user-profile strong{overflow-wrap:anywhere}
 .identity-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* Keep wallet diagnostics available without crowding the source overview. */
+.source-grid{align-items:start}
+.source-details{border-top:1px solid var(--line);padding-top:12px}
+.source-details summary{cursor:pointer;color:var(--muted);font-size:12px;padding:4px 0;width:fit-content}
+.source-details summary:hover{color:var(--ink)}
+.source-details summary:focus-visible{outline:2px solid #6b9671;outline-offset:4px;border-radius:3px}
+.source-details-content{display:flex;flex-direction:column;gap:12px;padding-top:16px;overflow-wrap:anywhere}
+.source-details-content p,.source-details-content .source-meta{margin:0}
+.wallet-address{font-family:monospace;overflow-wrap:anywhere}
+.wallet-explorers{display:flex;flex-wrap:wrap;gap:8px 16px}
+.wallet-explorers .address{margin:0;font-size:12px}

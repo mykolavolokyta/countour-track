@@ -66,3 +66,12 @@ Synchronization intervals live in the database per user, with optional per-sourc
 ## Secret storage
 
 Keep `.env` out of version control. Back up the encryption key separately from the database; losing it makes stored exchange and bank credentials unreadable. Generating a new key is not an existing-key rotation procedure.
+
+### EVM RPC endpoints
+
+`ETHEREUM_RPC_URLS`, `ARBITRUM_RPC_URLS`, `OPTIMISM_RPC_URLS` and
+`BASE_RPC_URLS` optionally override the bundled public endpoints. Like
+`BSC_RPC_URLS`, each is a comma-separated list with up to three endpoints used
+for fallback. Both Compose files pass these settings to the API and worker.
+RPC URLs are server-controlled and cannot be supplied by portfolio users.
+After changing settings, recreate the API and worker containers.

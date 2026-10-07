@@ -1,6 +1,7 @@
+export type Chain = 'bsc' | 'ethereum' | 'arbitrum' | 'optimism' | 'base';
 export type Kind = 'binance' | 'bybit' | 'bsc' | 'manual' | 'privatbank';
 export type Source = {
-  id: string; name: string; kind: Kind; config: {iban?: string; asset_category?: 'cash' | 'crypto' | 'other'; locked?: boolean; provider?: 'rpc' | 'moralis'; token_contracts?: string[]; address?: string; symbol?: string; quantity?: string; price_usd?: string | null; futures?: string[]};
+  id: string; name: string; kind: Kind; config: {chain?: Chain | 'all'; contracts_by_chain?: Partial<Record<Chain, string[]>>; iban?: string; asset_category?: 'cash' | 'crypto' | 'other'; locked?: boolean; provider?: 'rpc' | 'moralis'; token_contracts?: string[]; address?: string; symbol?: string; quantity?: string; price_usd?: string | null; futures?: string[]};
   interval_minutes: number | null; effective_interval: number; status: string; error: string | null;
   last_success: number | null; last_attempt: number | null; next_sync: number; has_credentials: boolean;
   total_usd: string | null; warnings: string[]; unpriced: number; stale: boolean;

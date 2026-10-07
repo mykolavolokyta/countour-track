@@ -189,9 +189,9 @@ def prices(symbols):
 
 
 def value_holdings(holdings):
-    rates = prices([h['symbol'] for h in holdings if h['value_usd'] is None and not h['asset_id'].startswith('bsc:')])
+    rates = prices([h['symbol'] for h in holdings if h['value_usd'] is None and not h['asset_id'].startswith(('bsc:', 'evm:'))])
     for h in holdings:
-        if h['value_usd'] is None and not h['asset_id'].startswith('bsc:') and h['symbol'] in rates:
+        if h['value_usd'] is None and not h['asset_id'].startswith(('bsc:', 'evm:')) and h['symbol'] in rates:
             h['value_usd'] = str(dec(h['quantity']) * rates[h['symbol']])
     return holdings
 
@@ -246,8 +246,11 @@ def collect(source, credentials):
         return privatbank_data(source.config['iban'], credentials)
     if source.kind == 'bsc':
         if source.config.get('provider', 'moralis') == 'rpc':
+            if source.config.get('chain') == 'all':
+                from .evm_wallet import evm_wallet_data
+                return evm_wallet_data(source.config['address'], source.config.get('contracts_by_chain', {}))
             from .bsc_rpc import bsc_rpc_data
-            return bsc_rpc_data(source.config['address'], source.config.get('token_contracts', []))
+            return bsc_rpc_data(source.config['address'], source.config.get('token_contracts', []), source.config.get('chain', 'bsc'))
         return bsc_data(source.config['address'])
     rows, positions, warnings = exchange_data(source.kind, credentials, source.config)
     return value_holdings(rows), positions, warnings

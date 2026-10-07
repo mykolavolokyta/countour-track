@@ -9,7 +9,7 @@ Contour combines Binance, Bybit, BNB Smart Chain, and PrivatBank business accoun
 - **Independent portfolios:** sources, snapshots, positions, and settings belong to the authenticated user.
 - **Google and Telegram sign-in:** OpenID Connect with PKCE; link both providers to one account, disconnect a secondary provider, and sign out on all devices.
 - **Exchange balances:** Binance Spot, Funding, and selected Futures accounts; Bybit UTA 2.0 and Funding.
-- **BSC wallets:** BNB and selected BEP-20 contracts through public RPC, with optional Moralis discovery.
+- **EVM wallets:** Ethereum, BSC, Arbitrum One, Optimism and Base through public RPC. One address can aggregate all five networks automatically. Native coins and up to 20 selected token contracts per network; optional Moralis discovery for a BSC-only source.
 - **Bank accounts:** PrivatBank FOP balances through Autoclient.
 - **Manual assets:** cash, crypto, and other assets with optional custom prices and a locked flag.
 - **Portfolio overview:** valuation history, source allocation, total and available crypto, cash, and bank balances.

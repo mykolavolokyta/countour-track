@@ -73,3 +73,77 @@ Locked assets count once toward total portfolio and crypto value. The available-
 - Balances synchronize independently; cross-source transfers may briefly produce inconsistent totals.
 
 Live integrations should be checked with the intended read-only accounts. Automated tests use controlled responses, not real funds.
+
+## EVM wallets across networks
+
+New wallet forms default to **All supported networks**. Enter one public
+address to aggregate Ethereum, BSC, Arbitrum One, Optimism and Base under one
+source. Every sync checks all five networks, including those whose last
+balance was zero. This covers the supported registry, not every EVM blockchain
+in existence.
+
+The native coin is automatic (BNB on BSC and ETH on the other four networks).
+The optional contract section accepts up to 20 ERC-20 contracts **per network**.
+An empty list means native coins only: selecting all networks does not enable
+automatic token discovery. RPC mode does not enumerate arbitrary tokens,
+NFTs, DeFi positions or staked balances.
+
+Existing single-network sources keep their coverage until edited. Select
+**All supported networks** to expand one; its previous contract list stays
+assigned to its original network. If other active sources track the same
+address in overlapping networks, disconnect those duplicates first. The API
+rejects overlapping coverage within a user's portfolio to prevent double
+counting. Separate users can independently track the same public wallet.
+Moralis discovery remains available for BSC-only sources.
+
+Each network verifies its chain ID and reads balances at one block height.
+Blocks are independent across networks. The combined snapshot is saved only
+when all networks succeed. If any network fails, the previous complete wallet
+snapshot remains visible and the source reports an error naming the failed
+network; initial failure leaves the wallet without a snapshot. Zero balances
+are valid successful results. Token identity and price caches are scoped by
+network, and missing prices stay unknown instead of borrowing a symbol price.
+
+Public RPC needs no paid subscription or wallet signature. Public endpoints
+and CoinGecko have quotas and availability limits. Hourly updates for a small
+number of wallets are the intended starting point, not unlimited free service.
+An optional CoinGecko Demo key can be configured on the server.
+
+### API compatibility
+
+The API retains `kind: "bsc"` for existing clients. `config.chain: "all"` enables
+combined coverage; `contracts_by_chain` maps network keys to contract lists.
+For example:
+
+```json
+{
+  "kind": "bsc",
+  "name": "My EVM wallet",
+  "address": "0x1111111111111111111111111111111111111111",
+  "provider": "rpc",
+  "chain": "all",
+  "contracts_by_chain": {}
+}
+```
+
+Single-network keys are `bsc`, `ethereum`, `arbitrum`, `optimism`, `base` and
+use `token_contracts`. Omitted chain defaults to BSC on create for compatibility;
+on edit it preserves the existing source's network. Expanding a single-network
+source to `all` is supported; replacing or narrowing its network is rejected.
+For an expansion with omitted `contracts_by_chain`, the old contract list is
+retained automatically. An explicit empty mapping clears the watchlists.
+Non-BSC asset IDs use `evm:<chain-id>:<contract-or-native>`; BSC IDs are unchanged.
+
+### Automatic token discovery and free plans
+
+Discovery without contract lists requires an indexer. Alchemy's documented
+Free tier includes Token API access and 30 million compute units per month
+(as checked October 7, 2026). Network coverage, per-method costs and quotas
+must be checked for the chosen endpoint. This is a possible future integration;
+Contour's all-network RPC mode does **not** currently call Alchemy or discover
+tokens automatically. No Alchemy API key is needed for the implemented mode.
+
+References: [Ethereum JSON-RPC](https://ethereum.org/developers/docs/apis/json-rpc/),
+[PublicNode endpoints](https://www.publicnode.com/),
+[Alchemy pricing plans](https://www.alchemy.com/docs/reference/pricing-plans),
+[Alchemy free-tier limits](https://support.alchemy.com/articles/5827006872-what-is-included-in-the-free-tier).

@@ -1,4 +1,4 @@
-"""Read BNB and an explicit BEP-20 watchlist without an indexer or wallet key."""
+"""Read native EVM balances and an explicit ERC-20 watchlist without an indexer or wallet key."""
 from decimal import Decimal
 import re
 import time
@@ -59,13 +59,15 @@ class RPC:
         return data['result']
 
 
-def read_balances(http, url, address, contracts, deadline=None):
+def read_balances(http, url, address, contracts, deadline=None, chain='bsc'):
+    network = config.EVM_CHAINS[chain]
+    prefix = ('bsc' if chain == 'bsc' else 'evm') + ':' + str(network['id']) + ':'
     rpc = RPC(http, url, deadline)
-    if uint(rpc.call('eth_chainId', [])) != 56:
+    if uint(rpc.call('eth_chainId', [])) != network['id']:
         raise RPCFailure()
     block = hex(uint(rpc.call('eth_blockNumber', [])))
     native = uint(rpc.call('eth_getBalance', [address, block]))
-    rows = [holding('BNB', Decimal(native) / Decimal(10) ** 18, 'BSC', 'bsc:56:native')] if native else []
+    rows = [holding(network['symbol'], Decimal(native) / Decimal(10) ** 18, network['name'], prefix + 'native')] if native else []
     warnings = []
     for contract in contracts:
         # All calls use the same block, including metadata. A bad/reverting
@@ -76,7 +78,7 @@ def read_balances(http, url, address, contracts, deadline=None):
             if decimals > 255:
                 raise RPCFailure()
         except RPCFailure:
-            raise RPCFailure(f'Не вдалося прочитати BEP-20 контракт {contract}. Перевірте адресу та доступність RPC.') from None
+            raise RPCFailure(f'Не вдалося прочитати ERC-20 контракт {contract}. Перевірте адресу та доступність RPC.') from None
         if not quantity:
             continue
         try:
@@ -84,17 +86,18 @@ def read_balances(http, url, address, contracts, deadline=None):
         except (RPCFailure, ValueError):
             symbol = contract[:8] + '…' + contract[-4:]
             warnings.append(f'Символ токена {contract} недоступний; баланс прочитано за контрактом.')
-        rows.append(holding(symbol, Decimal(quantity) / Decimal(10) ** decimals, 'BSC', 'bsc:56:' + contract))
+        rows.append(holding(symbol, Decimal(quantity) / Decimal(10) ** decimals, network['name'], prefix + contract))
     return rows, warnings, block
 
 
 _token_price_cache = {}
 
 
-def token_prices(contracts):
+def token_prices(contracts, chain='bsc'):
+    platform = config.EVM_CHAINS[chain]['platform']
     result, missing = {}, []
     for contract in contracts:
-        cached = _token_price_cache.get(contract)
+        cached = _token_price_cache.get((platform, contract))
         if cached and time.monotonic() - cached[0] < 300:
             result[contract] = cached[1]
         else:
@@ -102,7 +105,7 @@ def token_prices(contracts):
     if missing:
         try:
             with httpx.Client(timeout=15) as http:
-                response = http.get('https://api.coingecko.com/api/v3/simple/token_price/binance-smart-chain',
+                response = http.get('https://api.coingecko.com/api/v3/simple/token_price/' + platform,
                                     params={'contract_addresses': ','.join(missing), 'vs_currencies': 'usd'},
                                     headers={'x-cg-demo-api-key': config.COINGECKO_DEMO_API_KEY} if config.COINGECKO_DEMO_API_KEY else {})
                 response.raise_for_status()
@@ -111,29 +114,33 @@ def token_prices(contracts):
                     value = data.get(contract, {}).get('usd')
                     if value is not None and dec(value) > 0:
                         result[contract] = dec(value)
-                        _token_price_cache[contract] = (time.monotonic(), result[contract])
+                        _token_price_cache[(platform, contract)] = (time.monotonic(), result[contract])
         except (httpx.HTTPError, ValueError, TypeError, AttributeError):
             pass
     return result
 
 
-def bsc_rpc_data(address, contracts):
+def bsc_rpc_data(address, contracts, chain='bsc'):
+    if chain not in config.EVM_CHAINS:
+        raise SyncError('Непідтримувана EVM-мережа.')
+    network = config.EVM_CHAINS[chain]
+    endpoints = config.BSC_RPC_URLS if chain == 'bsc' else config.EVM_RPC_URLS.get(chain, ())
     # Validate even when called from persisted config or outside the HTTP API.
     if not re.fullmatch(r'0x[0-9a-fA-F]{40}', address) or len(contracts) > 20:
-        raise SyncError('Невірна BSC-адреса або понад 20 токенів у списку.')
+        raise SyncError('Невірна EVM-адреса або понад 20 токенів у списку.')
     contracts = [c.lower() for c in contracts]
     if len(set(contracts)) != len(contracts) or any(not re.fullmatch(r'0x[0-9a-f]{40}', c) or int(c[2:], 16) == 0 for c in contracts):
-        raise SyncError('Перевірте список BEP-20 контрактів: невірна адреса або повтор.')
-    if not config.BSC_RPC_URLS:
-        raise SyncError('Не налаштовано BSC RPC. Задайте BSC_RPC_URLS на сервері.')
-    last_message = 'BSC RPC тимчасово недоступний або повернув іншу мережу. Попередні дані збережено.'
+        raise SyncError('Перевірте список ERC-20 контрактів: невірна адреса або повтор.')
+    if not endpoints:
+        raise SyncError('Не налаштовано EVM RPC. Задайте RPC_URLS відповідної мережі на сервері.')
+    last_message = 'EVM RPC тимчасово недоступний або повернув іншу мережу. Попередні дані збережено.'
     deadline = time.monotonic() + 120
     with httpx.Client(timeout=10) as http:
-        for endpoint in config.BSC_RPC_URLS[:3]:
+        for endpoint in endpoints[:3]:
             if time.monotonic() >= deadline:
                 break
             try:
-                rows, warnings, block = read_balances(http, endpoint, address.lower(), contracts, deadline)
+                rows, warnings, block = read_balances(http, endpoint, address.lower(), contracts, deadline, chain)
                 break
             except RPCFailure as exc:
                 if str(exc):
@@ -141,19 +148,20 @@ def bsc_rpc_data(address, contracts):
             except (httpx.HTTPError, ValueError, TypeError):
                 # Try the entire snapshot again on the next endpoint, never mix
                 # rows from different nodes or carry a half-completed result.
-                last_message = 'BSC RPC не прочитав усі баланси. Перевірте контракти токенів; попередні дані збережено.'
+                last_message = 'EVM RPC не прочитав усі баланси. Перевірте контракти токенів; попередні дані збережено.'
         else:
             raise SyncError(last_message)
         if time.monotonic() >= deadline:
-            raise SyncError('BSC RPC не завершив оновлення за 2 хвилини. Попередні дані збережено.')
-    native_price = prices(['BNB']).get('BNB') if any(r['asset_id'] == 'bsc:56:native' for r in rows) else None
-    rates = token_prices([r['asset_id'].split(':')[-1] for r in rows if r['asset_id'] != 'bsc:56:native'])
+            raise SyncError('EVM RPC не завершив оновлення за 2 хвилини. Попередні дані збережено.')
+    native_price = prices([network['symbol']]).get(network['symbol']) if any(r['asset_id'].endswith(':native') for r in rows) else None
+    contracts_with_balance = [r['asset_id'].split(':')[-1] for r in rows if not r['asset_id'].endswith(':native')]
+    rates = token_prices(contracts_with_balance) if chain == 'bsc' else token_prices(contracts_with_balance, chain)
     for row in rows:
         contract = row['asset_id'].split(':')[-1]
         rate = native_price if contract == 'native' else rates.get(contract)
         if rate is not None:
             row['value_usd'] = str(dec(row['quantity']) * rate)
-    warnings.append(f'RPC: BNB + {len(contracts)} контрактів зі списку. Інші токени, DeFi та NFT не включені. Блок {int(block, 16)}.')
+    warnings.append(f"RPC: {network['name']} · {network['symbol']} + {len(contracts)} контрактів зі списку. Інші токени, DeFi та NFT не включені. Блок {int(block, 16)}.")
     if any(r['value_usd'] is None for r in rows):
         warnings.append('Для частини активів немає ціни CoinGecko. Їхня кількість збережена, але оцінка портфеля неповна.')
     return rows, [], warnings
