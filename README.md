@@ -1,4 +1,4 @@
-# Contour
+# Contour (https://contourtrack.com)
 
 A self-hosted, multi-user portfolio tracker for exchange balances, on-chain wallets, bank accounts, and manually recorded assets.
 
